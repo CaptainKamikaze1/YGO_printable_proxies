@@ -9,31 +9,38 @@ A Yu-Gi-Oh! proxy card generator delivered as a **single self-contained `index.h
 Hard constraints from the spec that any change must preserve:
 - Stays a **single self-contained HTML file** — no bundlers, no build step, no external scripts/styles, no analytics/tracking
 - Must run by double-clicking the file (`file://` origin) in current Chrome/Firefox/Edge/Safari on Windows/macOS/Linux
+- Filename must stay `index.html` (root of the repo) so it's served as the GitHub Pages entry point
+
+## Deployment
+
+The repo is published via **GitHub Pages** from the `main` branch root — live at https://captainkamikaze1.github.io/YGO_printable_proxies/ (see `README.md`). Pages serves `index.html` directly with no build step; pushing to `main` is the entire deploy process. The page works identically from `file://` and from the HTTPS Pages origin since the YGOPRODeck API allows CORS from any origin.
 
 ## Running / testing
 
-There is no build, lint, or test tooling — open `index.html` directly in a browser (double-click, or `file://...index.html`). The YGOPRODeck API allows CORS from any origin, so `fetch` works fine from a `file://` page. The file is also deployed as a static site via GitHub Pages — see [README.md](README.md) for the live URL.
+There is no build, lint, or test tooling — open `index.html` directly in a browser (double-click, or `file://...index.html`), or visit the live GitHub Pages URL above. The YGOPRODeck API allows CORS from any origin, so `fetch` works fine from a `file://` page.
 
 Manual verification checklist (no automated tests exist):
 - Search a card name (debounced ~400ms) → results show thumbnail/name/type → click adds to deck
 - Adjust quantity (1–3), remove a card, confirm the live total count
 - Export `.ydk`, re-import it, confirm the deck round-trips (including multi-copy counts capped at 3)
 - Open print preview → verify 3×3 grid, crop marks, and mirrored card-back pages when the back toggle is on → `window.print()`
-- Toggle DE/EN and confirm all visible strings switch
+- Toggle EN/DE and confirm all visible strings switch (default language is **English** — `lang` starts as `'en'`; the language toggle only changes UI text, not card images, see "i18n & language disclaimer" below)
 - Resize the window to confirm the two-column → single-column responsive breakpoint
 
 ## Architecture
 
 Everything lives in `index.html`. The inline `<script>` is one IIFE organized into clearly-separated sections (in source order):
 
-1. **i18n** — `STRINGS` dict (`de`/`en`), `t(key)` lookup, `applyI18n()` walks `[data-i18n]` / `[data-i18n-placeholder]` elements and re-renders dynamic lists so language switches affect already-rendered content too
+1. **i18n** — `STRINGS` dict (`de`/`en`, default `lang = 'en'`), `t(key)` lookup, `applyI18n()` walks `[data-i18n]` / `[data-i18n-placeholder]` elements and re-renders dynamic lists so language switches affect already-rendered content too. **Important caveat:** the YGOPRODeck API only stores card *images* in English — `language=de` only translates names/types/descriptions returned by the search, never the artwork — so switching to German changes the UI and search-result text but printed proxies are always in English. This is called out explicitly via the `langDisclaimer` string rendered under the header (`.lang-disclaimer`).
 2. **API client** — `normalizeCard`, `searchCards`, `resolveCardsByIds` wrap the YGOPRODeck `cardinfo.php` endpoint (search by `fname`, batch-resolve by `id`); a `400` response means "no matches" and is treated as an empty result, not an error
 3. **Search** — debounced input handler with `AbortController` to cancel stale in-flight requests; renders into `#search-results`
 4. **Deck state** — plain array `deck` of `{ id, name, type, image, imageSmall, quantity }`; `addCardToDeck` / `setQuantity` / `removeCard` / `totalCount` mutate it directly, and every mutation calls `renderDeck()` to redraw `#deck-list` and the live count
 5. **YDK import/export** — `exportYdk` builds `#main`/`#extra`/`#side` text and triggers a `Blob` download; `parseYdkMainIds` + `onImportFile` parse the `#main` block, dedupe/cap copies at 3, batch-resolve names via the API, and replace `deck` wholesale
-6. **Print preview** — `renderPrintPages` expands the deck by quantity, chunks into groups of 9, and builds one `.print-page` per group via `buildPage(cards, isBack)`; back pages reuse the same card grouping with `CARD_BACK_URL` and a `.mirrored` class (`transform: scaleX(-1)`) so duplex long-edge printing aligns backs to fronts; crop marks are 4 absolutely-positioned `.crop-mark` spans per `.card-slot`
+6. **Print preview** — `renderPrintPages` expands the deck by quantity, chunks into groups of 9, and builds one `.print-page` per group via `buildPage(cards, isBack)`; back pages reuse the same card grouping with `CARD_BACK_URL` (a base64 `data:image/jpeg` URI embedded inline — currently the "fiery swirl" artwork by icycatelf, sourced from https://www.deviantart.com/stash/0cz210ardpx, JPEG-compressed via Pillow to keep the file size reasonable) and a `.mirrored` class (`transform: scaleX(-1)`) so duplex long-edge printing aligns backs to fronts; crop marks are 4 absolutely-positioned `.crop-mark` spans per `.card-slot`
 7. **Wiring** — all `addEventListener` calls and the initial `applyI18n()` / `renderDeck()` at the bottom of the IIFE
 
 CSS lives in the `<head>` `<style>` block, organized as: theme variables (dark + gold palette via custom properties) → layout/panels/buttons/lists → toast → print-overlay/preview grid/crop-marks → `@media print` (hides the app shell, shows only `.print-pages`, sets `@page { size: A4; margin: 0 }`).
+
+The `<footer class="app-footer">` below `<main>` credits the data sources (YGOPRODeck API for card data/images, icycatelf/DeviantArt for the card-back artwork) via translated labels (`footerDataSource` / `footerBackSource`) plus static `<a>` links — link text is left untranslated since it's a proper noun.
 
 When adding features, keep new code inside the existing IIFE sections rather than introducing new files or external scripts — the single-file deliverable constraint is the whole point of this project (see `REQUIREMENTS.md` → "Infrastruktur").
